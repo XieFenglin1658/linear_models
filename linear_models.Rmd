@@ -1,0 +1,320 @@
+---
+title: "Linear Models"
+author: "Fenglin Xie"
+date: "2025-11-12"
+output: github_document
+---
+
+##lm for linear models
+
+##glm for generalized linear models--需要注明具体使用哪一个
+
+##argument include：1.formula: y ~ x1 + x2; 2.data
+
+##有时候outcome会很复杂，使用broom package to tidy up the output
+
+```{r, include = FALSE, message = FALSE, warning = FALSE}
+library(tidyverse)
+
+knitr::opts_chunk$set(
+	echo = TRUE,
+	warning = FALSE,
+  fig.width = 6,
+  fig.asp = .6,
+  out.width = "90%"
+)
+
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+```
+
+Load key packages.
+
+```{r}
+library(tidyverse)
+library(p8105.datasets)
+```
+
+Load the NYC airbnb data.
+
+```{r}
+data(nyc_airbnb)
+```
+
+Look at the data / do some cleaning.
+##选择所有可能和price相关的变量做回归
+
+```{r}
+nyc_airbnb = 
+  nyc_airbnb |> 
+  mutate(
+    stars = review_scores_location / 2
+  ) |> 
+  rename(
+    borough = neighbourhood_group
+  ) |> 
+  filter(borough != "Staten Island") |> 
+  select(price, stars, borough, room_type, neighbourhood)
+```
+
+Do regression!!!
+##formula + data
+##borough是一个categorical variable，R会把他转化成factor，并自动选择首字母排序第一的变量（Bronx）作为default variable，其余所有的variable都是和它（Bronx）做比较
+
+```{r}
+fit = lm(price ~ stars + borough, data = nyc_airbnb)
+```
+
+do some additional cleaning then refit.
+##现在重新调整为Manhattan作为default variable
+
+```{r}
+nyc_airbnb |> 
+  count(borough)
+
+nyc_airbnb = 
+  nyc_airbnb |> 
+  mutate(
+    borough = fct_infreq(borough),
+    room_type = fct_infreq(room_type)
+  )
+
+fit = lm(price ~ stars + borough, data = nyc_airbnb)
+```
+
+Look at `lm` stuff
+
+```{r, eval = FALSE}
+
+##展示fit中包含的所有信息
+summary(fit)
+
+##展示所有信息的名称
+names(summary(fit))
+
+##单独调取其中一个信息进行查看
+summary(fit)[["coefficients"]]
+summary(fit)[["df"]]
+
+##导出每个数据点对应的结果(y)
+fitted.values(fit)
+
+##导出每个数据点对应的residual的value
+resid(fit)
+```
+
+Look at cleaner `lm` stuff
+##`broom::tidy()`--pull out all the things that you care about(coefficient\p-value\estimate...)--用途非常广泛，tidy up almost everything, t test 什么的也能用
+
+##`broom::glance()`--pull out the things like R^2, AIC,BIC...
+```{r}
+
+##制作一个简洁的table，只展示自己care about的信息
+fit |> 
+  broom::tidy() |> 
+  mutate(
+    term = str_replace(term, "borough", "Borough: ")
+  ) |> 
+  select(term, estimate, p.value) |> 
+  knitr::kable(digits = 3)
+
+
+fit |> 
+  broom::glance()
+```
+
+
+## Diagnostics
+
+Look at residuals.
+##`modelr::add_residuals`将residual这一项加入到dataframe中，每个数据对应有一个residual的值，得到的结果依旧是dataframe的形式
+##`modelr::add_predictions`将预测值加入到dataframe中
+
+```{r}
+nyc_airbnb |> 
+  modelr::add_residuals(fit) |> 
+  modelr::add_predictions(fit) |> 
+  filter(resid < 1000) |> 
+  ggplot(aes(x = resid)) + 
+  geom_histogram()
+
+nyc_airbnb |> 
+  modelr::add_residuals(fit) |> 
+  modelr::add_predictions(fit) |> 
+  filter(resid < 1000) |> 
+  ggplot(aes(x = borough, y = resid)) + 
+  geom_violin()
+
+nyc_airbnb |> 
+  modelr::add_residuals(fit) |> 
+  modelr::add_predictions(fit) |> 
+  filter(resid < 1000) |> 
+  ggplot(aes(x = stars, y = resid)) + 
+  geom_point()
+```
+
+
+## Hypothesis testing
+
+若只是想看coefficient的p-value，直接`broom::tidy()`即可
+
+```{r}
+fit |> 
+  broom::tidy()
+```
+
+What about a categorical variable?
+
+```{r}
+fit_alt = lm(price ~ stars + borough + room_type, data = nyc_airbnb)
+fit_null = lm(price ~ stars + borough, data = nyc_airbnb)
+
+anova(fit_null, fit_alt) |> 
+  broom::tidy()
+```
+
+
+## Interactions vs nested data
+
+
+```{r}
+fit_interactions =
+  lm(price ~ stars * borough + room_type * borough, data = nyc_airbnb)
+
+
+fit_interactions |> 
+  broom::tidy()
+```
+
+##若只想看单独的某一个borough
+
+Let's just look at Brooklyn first.
+##`data = _`表明我使用的dataset（nyc_airbnb）放在这里,因为pipe operator会把我们给的dataframe放在之后操作的first argument中，而lm这个function的first argument并不是dataframe，而是formula，所以需要告诉the pipe operator where to put the dataframe
+```{r}
+nyc_airbnb |> 
+  filter(borough == "Brooklyn") |> 
+  lm(price ~ stars + room_type, data = _) |> ##不需要加入borough了，因为已经固定了选择Brooklyn
+  broom::tidy()
+
+nyc_airbnb |> 
+  filter(borough == "Manhattan") |> 
+  lm(price ~ stars + room_type, data = _) |> 
+  broom::tidy()
+
+nyc_airbnb |> 
+  filter(borough == "Bronx") |> 
+  lm(price ~ stars + room_type, data = _) |> 
+  broom::tidy()
+
+nyc_airbnb |> 
+  filter(borough == "Queens") |> 
+  lm(price ~ stars + room_type, data = _) |> 
+  broom::tidy()
+
+```
+
+以上操作都是一样的：
+Write a short function
+
+```{r}
+lm_airbnb = function(df) {
+  
+  lm(price ~ stars + room_type, data = df)
+  
+}
+
+nyc_airbnb |> 
+  filter(borough == "Queens") |> 
+  lm_airbnb() |> 
+  broom::tidy()
+```
+
+依旧是要每次都输入不同的df分别得出结果，不如直接iteration
+
+Create a list of dataframes, and iterate to fit the model each time.
+
+```{r}
+nested_lm_results = 
+  nyc_airbnb |> 
+  nest(data = -borough) |>  ##把除了borough之外的所有变量都nest到一个dataframe中，取名叫做data，borough依旧在原dataframe中，只是没有被nest到一起
+  mutate(
+    fits = map(data, lm_airbnb), ##data是一个list，map会自动把list中的每一个值都放到function中进行操作然后依旧返回为list，和其他column组成dataframe
+    results = map(fits, broom::tidy)
+  ) |> 
+  select(borough, results) |> 
+  unnest(results)
+```
+
+Do some untidying.
+
+```{r}
+nested_lm_results |> 
+  select(borough, term, estimate) |> 
+  pivot_wider(
+    names_from = term, 
+    values_from = estimate
+  )
+```
+
+
+Use an *anonymous* function instead of `lm_airbnb`
+##不需要提前写下function是什么，直接在iteration的操作中写出function，也就是说这个function只在这个iteration中出现被用到，它本身并没有被专门创造和定义
+```{r}
+nested_lm_results = 
+  nyc_airbnb |> 
+  nest(data = -borough) |> 
+  mutate(
+    fits = map(data, \(df) lm(price ~ stars + room_type, data = df)),
+    results = map(fits, broom::tidy)
+  ) |> 
+  select(borough, results) |> 
+  unnest(results)
+
+nested_lm_results |> 
+  select(borough, term, estimate) |> 
+  pivot_wider(
+    names_from = term, 
+    values_from = estimate
+  )
+```
+
+
+
+Let's do an even more extreme example!!
+
+```{r}
+manhattan_analysis =
+  nyc_airbnb |> 
+  filter(
+    borough == "Manhattan"
+  ) |> 
+  nest(data = -neighbourhood) |> 
+  mutate(
+    fits = map(data, \(df) lm(price ~ stars + room_type, data = df)),
+    results = map(fits, broom::tidy)
+  ) |> 
+  select(neighbourhood, results) |> 
+  unnest(results)
+```
+
+Make a plot
+
+```{r}
+manhattan_analysis |> 
+  filter(term == "stars") |> 
+  mutate(
+    neighbourhood = fct_reorder(neighbourhood, estimate)
+  ) |> 
+  ggplot(aes(x = neighbourhood, y = estimate)) + 
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
