@@ -91,7 +91,7 @@ sim_df_nonconst |>
 | (Intercept) |    1.934 |     0.105 |    18.456 |       0 |
 | x           |    3.112 |     0.075 |    41.661 |       0 |
 
-可以看到这两个样本的sd都是很相近的（方差不相等的结果和方差相等的结果一样），但其实并不是这样，这里sim_df_nonconst得出的结果并不是真实的结果，`lm`是按照assumption得出的数据，但是其实sim_df_nonconst并不符合这些assumption，但我们可以通过bootstrapping模拟得出它在真实data
+可以看到这两个样本的sd都是很相近的（方差不相等的结果和方差相等的结果一样），但其实并不是这样，这里sim_df_nonconst得出的结果并不是真实的结果，`lm`是基于assumption得出的数据，但是其实sim_df_nonconst并不符合这些assumption，但我们可以通过bootstrapping模拟得出它在真实data
 generating mechanism下产生的结果。
 
 Write a function to draw a bootstrap sample.
@@ -201,7 +201,7 @@ bootstrap_results |>
 可以看到是几近normal distribution，但和之前直接做lm不同，这里的sd不一样
 
 95% CI
-\##不直接使用mean+-2\*sd的公式来计算95%CI，因为这可能只是看起来像normal，实际不是（但大部分情况你可以用这个公式如果你认为这就是normal的话）
+\##不直接使用mean+-2\*sd的公式来计算95%CI，因为这可能只是看起来像normal，实际不是（但大部分情况你可以用这个公式如果你认为这就是normal的话，用这个公式做近似值也未尝不可）
 
 ``` r
 bootstrap_results |> 
@@ -223,11 +223,13 @@ bootstrap_results |>
 ## Do it again but faster this time
 
 `modelr`
-package中有`bootstrap`这个function可以直接用，不用像上面那样自己写公式–`bootstrap(dataset，bootstrap的次数)`
+package中有`bootstrap`这个function可以直接用，不用像上面那样自己写公式–`bootstrap(dataset，bootstrap的次数)`,得出来的是resample的形式，需要转化成dataframe（as.tibble）
+
+\##先从次数少的时候开始，看看code是否work，之后再改成大数量的bootstrap
 
 ``` r
 bootstrap_results = 
-  sim_df_const |> 
+  sim_df_nonconst |> 
   bootstrap(n = 5000) |> 
   mutate(
     df = map(strap, as_tibble),
@@ -252,12 +254,28 @@ bootstrap_results |>
     ## # A tibble: 2 × 3
     ##   term         mean     se
     ##   <chr>       <dbl>  <dbl>
-    ## 1 (Intercept)  1.98 0.0974
-    ## 2 x            3.04 0.0707
+    ## 1 (Intercept)  1.93 0.0759
+    ## 2 x            3.11 0.103
+
+\##若使用bootstrap去处理方差相等的sample，得出来的结果和之前一样
+
+bootstrap do the right things no matter whether the assumption met or
+not
+
+``` r
+bootstrap_results = 
+  sim_df_const |> 
+  bootstrap(n = 5000) |> 
+  mutate(
+    df = map(strap, as_tibble),
+    fits = map(df, \(df) lm(y ~ x, data = df)),
+    results = map(fits, broom::tidy)
+  ) |> 
+  select(.id, results) |> 
+  unnest(results)
+```
 
 ## Airbnb
-
-Remember this one?
 
 ``` r
 data("nyc_airbnb")
@@ -283,7 +301,9 @@ nyc_airbnb |>
   geom_point(alpha = .5)
 ```
 
-<img src="bootstrapping_files/figure-gfm/unnamed-chunk-18-1.png" width="90%" />
+<img src="bootstrapping_files/figure-gfm/unnamed-chunk-19-1.png" width="90%" />
+这个分布看起来完全不是normal
+distribution！NO!我们不能直接使用`lm`得出推断
 
 Try to do the bootstrap.
 
@@ -310,4 +330,7 @@ airbnb_bootstrap_results |>
   geom_density()
 ```
 
-<img src="bootstrapping_files/figure-gfm/unnamed-chunk-20-1.png" width="90%" />
+<img src="bootstrapping_files/figure-gfm/unnamed-chunk-21-1.png" width="90%" />
+
+看最后得到的图像，这个系数并不服从normal
+distribution，我们可以由此得出结论：并不满足assumption，那么我我们如果想做推断（test、CI）则不可以直接使用`lm`的结果，需要通过其他方式，比如算95%CI，直接从图中划分相应百分比得出结果，而不是通过mean+-2\*sd的公式。
